@@ -1,0 +1,46 @@
+name: Deploy jAI.me UI
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to Remote Server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            set -e
+            cd /root/Projetos/jAI.me/llm-ui
+
+            echo "📥 Atualizando código..."
+            git reset --hard origin/main || git reset --hard
+            git clean -fd
+            git pull origin main
+
+            echo "📦 Instalando dependências..."
+            npm install --legacy-peer-deps
+
+            echo "🔨 Buildando o Frontend (Next.js)..."
+            # Adicione variáveis de ambiente se necessário aqui
+            # Exemplo: NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }}
+            npm run build
+
+            echo "♻️ Reiniciando com PM2..."
+            # Tenta dar reload se o processo já existir, caso contrário inicia
+            pm2 reload ecosystem.config.js --update-env || pm2 start ecosystem.config.js
+
+            echo "💾 Salvando estado do PM2..."
+            pm2 save
+
+            echo "✅ Deploy concluído com sucesso!"

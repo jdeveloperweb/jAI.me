@@ -1,5 +1,4 @@
-"use client"
-import { useEffect, useRef, useState, useCallback } from "react"
+import React, { useEffect, useRef, useState, useCallback } from "react"
 import "./chat.css"
 
 type Role = "user" | "assistant"
@@ -8,103 +7,21 @@ type Message = {
   content: string
 }
 
-// ── Syntax highlight ──────────────────────────────────────────────────────────
-const TOKEN_PATTERNS: Array<{ regex: RegExp; className: string }> = [
-  { regex: /("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)/g, className: "tok-string" },
-  {
-    regex:
-      /\b(const|let|var|function|return|if|else|for|while|class|import|export|from|default|async|await|try|catch|throw|new|typeof|instanceof|void|null|undefined|true|false|this|super|extends|implements|interface|type|enum|in|of|do|switch|case|break|continue|yield|static|public|private|protected|readonly|abstract|override|declare|namespace|module|require)\b/g,
-    className: "tok-keyword",
-  },
-  { regex: /\b([A-Z][A-Za-z0-9_]*)\b/g, className: "tok-class" },
-  { regex: /\b(\d+\.?\d*)\b/g, className: "tok-number" },
-  { regex: /(\/\/[^\n]*|\/\*[\s\S]*?\*\/|#[^\n]*)/g, className: "tok-comment" },
-  { regex: /\b([a-z_][a-z0-9_]*)(?=\s*\()/gi, className: "tok-function" },
-]
+import ReactMarkdown from "react-markdown"
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter"
+import { atomDark } from "react-syntax-highlighter/dist/esm/styles/prism"
+import remarkGfm from "remark-gfm"
 
-function syntaxHighlight(code: string): string {
-  const placeholder = "\x00PH\x00"
-  const store: string[] = []
-
-  let result = code
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-
-  result = result.replace(TOKEN_PATTERNS[0].regex, (m) => {
-    store.push(`<span class="${TOKEN_PATTERNS[0].className}">${m}</span>`)
-    return `${placeholder}${store.length - 1}${placeholder}`
-  })
-
-  result = result.replace(TOKEN_PATTERNS[5].regex, (m) => {
-    store.push(`<span class="${TOKEN_PATTERNS[5].className}">${m}</span>`)
-    return `${placeholder}${store.length - 1}${placeholder}`
-  })
-
-  for (let i = 1; i <= 4; i++) {
-    const { regex, className } = TOKEN_PATTERNS[i]
-    result = result.replace(regex, (m) => {
-      if (m.includes(placeholder)) return m
-      return `<span class="${className}">${m}</span>`
-    })
-  }
-
-  result = result.replace(
-    new RegExp(`${placeholder}(\\d+)${placeholder}`, "g"),
-    (_, idx) => store[+idx]
-  )
-
-  return result
-}
-
-// ── Message parser ────────────────────────────────────────────────────────────
-type Segment =
-  | { type: "text"; content: string }
-  | { type: "code"; language: string; content: string }
-
-function parseMessage(raw: string): Segment[] {
-  const segments: Segment[] = []
-  const regex = /```(\w*)\n?([\s\S]*?)```/g
-  let lastIndex = 0
-  let match: RegExpExecArray | null
-
-  while ((match = regex.exec(raw)) !== null) {
-    if (match.index > lastIndex)
-      segments.push({ type: "text", content: raw.slice(lastIndex, match.index) })
-    segments.push({ type: "code", language: match[1] || "plaintext", content: match[2].trimEnd() })
-    lastIndex = regex.lastIndex
-  }
-
-  if (lastIndex < raw.length)
-    segments.push({ type: "text", content: raw.slice(lastIndex) })
-
-  return segments
-}
-
-// ── Inline text renderer ──────────────────────────────────────────────────────
-function renderInlineText(text: string) {
-  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g)
-  return parts.map((part, i) => {
-    if (part.startsWith("`") && part.endsWith("`"))
-      return <code key={i} className="inline-code">{part.slice(1, -1)}</code>
-    if (part.startsWith("**") && part.endsWith("**"))
-      return <strong key={i}>{part.slice(2, -2)}</strong>
-    if (part.startsWith("*") && part.endsWith("*"))
-      return <em key={i}>{part.slice(1, -1)}</em>
-    return <span key={i}>{part}</span>
-  })
-}
-
-// ── Code Block ────────────────────────────────────────────────────────────────
-function CodeBlock({ language, content }: { language: string; content: string }) {
+// ── Code Block Component ──────────────────────────────────────────────────────
+function CodeBlock({ language, value }: { language: string; value: string }) {
   const [copied, setCopied] = useState(false)
 
   const copy = useCallback(() => {
-    navigator.clipboard.writeText(content).then(() => {
+    navigator.clipboard.writeText(value).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     })
-  }, [content])
+  }, [value])
 
   return (
     <div className="code-block">
@@ -129,29 +46,44 @@ function CodeBlock({ language, content }: { language: string; content: string })
           )}
         </button>
       </div>
-      <pre className="code-body">
-        <code dangerouslySetInnerHTML={{ __html: syntaxHighlight(content) }} />
-      </pre>
+      <div className="code-body">
+        <SyntaxHighlighter
+          language={language || "javascript"}
+          style={atomDark}
+          customStyle={{ margin: 0, padding: "16px", background: "transparent", fontSize: "13px" }}
+        >
+          {value}
+        </SyntaxHighlighter>
+      </div>
     </div>
   )
 }
 
-// ── Message content renderer ──────────────────────────────────────────────────
+// ── Message Content Renderer ──────────────────────────────────────────────────
 function MessageContent({ content }: { content: string }) {
-  const segments = parseMessage(content)
   return (
     <div className="msg-content">
-      {segments.map((seg, i) =>
-        seg.type === "code" ? (
-          <CodeBlock key={i} language={seg.language} content={seg.content} />
-        ) : (
-          <div key={i} className="msg-text">
-            {seg.content.split("\n").map((line, j) => (
-              <p key={j}>{renderInlineText(line)}</p>
-            ))}
-          </div>
-        )
-      )}
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          code({ node, inline, className, children, ...props }: { node?: any, inline?: boolean, className?: string, children?: React.ReactNode } & any) {
+            const match = /language-(\w+)/.exec(className || "")
+            return !inline && match ? (
+              <CodeBlock
+                language={match[1]}
+                value={String(children).replace(/\n$/, "")}
+              />
+            ) : (
+              <code className="inline-code" {...props}>
+                {children}
+              </code>
+            )
+          },
+          p: ({ children }: { children?: React.ReactNode }) => <p className="msg-text">{children}</p>,
+        }}
+      >
+        {content}
+      </ReactMarkdown>
     </div>
   )
 }
