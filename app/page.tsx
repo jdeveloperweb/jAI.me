@@ -6,6 +6,7 @@ type Role = "user" | "assistant"
 type Message = {
   role: Role
   content: string
+  isError?: boolean
 }
 
 import ReactMarkdown from "react-markdown"
@@ -130,31 +131,58 @@ export default function Chat() {
     ta.style.height = Math.min(ta.scrollHeight, 160) + "px"
   }, [input])
 
-  async function sendMessage(e?: React.FormEvent) {
+  async function sendMessage(e?: React.FormEvent, customPrompt?: string) {
     e?.preventDefault()
-    if (!input.trim() || loading) return
+    const prompt = customPrompt || input
+    if (!prompt.trim() || loading) return
 
-    const userMsg: Message = { role: "user", content: input }
-    setMessages((prev) => [...prev, userMsg])
-    setInput("")
+    if (!customPrompt) {
+      const userMsg: Message = { role: "user", content: prompt }
+      setMessages((prev) => [...prev, userMsg])
+      setInput("")
+    }
+
     setLoading(true)
 
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: userMsg.content, model }),
+        body: JSON.stringify({ prompt: prompt, model }),
       })
+
       const data = await res.json()
+
+      if (!res.ok) throw new Error(data.message || "Erro desconhecido")
+
       setMessages((prev) => [...prev, { role: "assistant", content: data.message }])
-    } catch {
+    } catch (err: any) {
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: "Erro ao gerar resposta." },
+        {
+          role: "assistant",
+          content: err.message || "Erro ao gerar resposta. Verifique o Ollama.",
+          isError: true
+        },
       ])
     }
 
     setLoading(false)
+  }
+
+  const retryLastMessage = () => {
+    const lastUserMsg = [...messages].reverse().find(m => m.role === "user")
+    if (lastUserMsg) {
+      // Remover a mensagem de erro anterior se houver
+      setMessages(prev => {
+        const last = prev[prev.length - 1]
+        if (last && last.role === "assistant" && last.isError) {
+          return prev.slice(0, -1)
+        }
+        return prev
+      })
+      sendMessage(undefined, lastUserMsg.content)
+    }
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -176,7 +204,7 @@ export default function Chat() {
               <line x1="2" y1="15.5" x2="22" y2="15.5" />
             </svg>
           </div>
-          <span className="brand-name">jAI.me</span>
+          <span className="brand-name">j<span className="brand-ai">AI</span>.me</span>
         </div>
         <select
           className="model-select"
@@ -198,9 +226,20 @@ export default function Chat() {
         )}
         {messages.map((m, i) => (
           <div key={i} className={`msg-row ${m.role}`}>
-            <div className={`msg-bubble ${m.role}`}>
+            <div className={`msg-bubble ${m.role} ${m.isError ? 'error' : ''}`}>
               {m.role === "assistant" ? (
-                <MessageContent content={m.content} />
+                <>
+                  <MessageContent content={m.content} />
+                  {m.isError && (
+                    <button className="retry-btn" onClick={retryLastMessage}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M23 4v6h-6" />
+                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                      </svg>
+                      Tentar novamente
+                    </button>
+                  )}
+                </>
               ) : (
                 <span>{m.content}</span>
               )}
@@ -216,6 +255,7 @@ export default function Chat() {
         )}
         <div ref={bottomRef} />
       </main>
+
 
       <footer className="chat-footer">
         <form className="input-form" onSubmit={sendMessage}>

@@ -15,15 +15,25 @@ export async function POST(req: Request) {
         prompt: prompt,
         stream: false,
       }),
+    }).catch(err => {
+      console.error("Ollama connection error:", err)
+      throw new Error("Não foi possível conectar ao Ollama. Verifique se ele está rodando na porta 11434.")
     })
 
     if (!res.ok) {
       const errorText = await res.text()
-      console.error("Ollama error:", errorText)
-      return Response.json(
-        { message: `Erro no servidor Ollama: ${res.statusText}` },
-        { status: res.status }
-      )
+      try {
+        const errorJson = JSON.parse(errorText)
+        return Response.json(
+          { message: `Erro no Ollama: ${errorJson.error || res.statusText}` },
+          { status: res.status }
+        )
+      } catch {
+        return Response.json(
+          { message: `Erro no servidor Ollama (${res.status}): ${res.statusText}` },
+          { status: res.status }
+        )
+      }
     }
 
     const data = await res.json()
@@ -33,7 +43,7 @@ export async function POST(req: Request) {
   } catch (err: any) {
     console.error("Chat API Error:", err)
     return Response.json(
-      { message: "Erro ao consultar modelo. Verifique se o Ollama está rodando localmente." },
+      { message: err.message || "Erro ao consultar modelo." },
       { status: 500 }
     )
   }
